@@ -436,8 +436,9 @@ async function cerrarVotacion(interaction, partida) {
     partida.players.get(eliminadoId).vivo = false;
   }
 
-  const finPorImpostoresEliminados = partida.impostores.size === 0;
-  const finPorRondas = partida.ronda >= partida.rondasMaximas;
+   const finPorImpostoresEliminados = partida.impostores.size === 0;
+   const impostorSigueVivo = [...partida.impostores].some(id => partida.players.get(id)?.vivo);
+   const finPorRondas = partida.ronda >= partida.rondasMaximas && impostorSigueVivo;
 
   if (finPorImpostoresEliminados || finPorRondas) {
     const ganador = finPorImpostoresEliminados ? 'equipo' : 'impostor';
