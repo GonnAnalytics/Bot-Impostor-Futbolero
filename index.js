@@ -25,7 +25,7 @@ const FUTBOLISTAS = [
   'Raúl González','Luis Suárez','Edinson Cavani','Diego Forlán',
   'Antoine Griezmann','Karim Benzema','Eden Hazard','Kevin De Bruyne',
   'Mohamed Salah','Sadio Mané','Robert Lewandowski','Harry Kane',
-  'Paul Pogba','N\'Golo Kanté','Mesut Özil','Thomas Müller',
+  'Paul Pogba',"N'Golo Kanté",'Mesut Özil','Thomas Müller',
   'Manuel Neuer','Philipp Lahm','Bastian Schweinsteiger',
   'Toni Kroos','Marco Reus','Mario Götze','Joshua Kimmich',
   'Jamal Musiala','Jude Bellingham','Pedri','Gavi','Ansu Fati',
@@ -52,16 +52,15 @@ const FUTBOLISTAS = [
   'Son Heung-min','Miguel Merentiel',
   'Didier Deschamps','Mastantuono',
   'Dani Alves','Roberto Carlos','Cafu','Isco',
-  'Chiquito Romero','Rivaldo','Cholo Simeone',
+  'Xavi Simons','Rivaldo','Cholo Simeone',
   'Enzo Francescoli','Diego Godín',
   'Paulo Dybala','Lautaro Martínez',
   'Bukayo Saka','Declan Rice',
   'Victor Osimhen','Khvicha Kvaratskhelia',
-  'João Félix','Bruno Fernandes'
+  'João Félix','Bruno Fernandes',
 ];
 
 // ===== ESTADO =====
-// players: Map<userId, { username, vivo }>
 const partidas = new Map();
 
 // ===== HELPERS =====
@@ -69,20 +68,23 @@ function elegirAlAzar(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
+// Impostores aleatorios con 6+ jugadores
 function calcularImpostores(total) {
   if (total <= 5) return 1;
-  if (total <= 8) return 2;
-  return 3;
-}
-
-function calcularRondasMaximas(total) {
-  if (total <= 5) return 1;
-  if (total <= 8) return 2;
-  return 3;
+  if (total <= 8) return Math.random() < 0.5 ? 1 : 2;
+  return Math.random() < 0.5 ? 2 : 3;
 }
 
 function jugadoresVivos(partida) {
   return [...partida.players.entries()].filter(([, d]) => d.vivo);
+}
+
+function inocentesVivos(partida) {
+  return jugadoresVivos(partida).filter(([id]) => !partida.impostores.has(id));
+}
+
+function impostoresVivos(partida) {
+  return jugadoresVivos(partida).filter(([id]) => partida.impostores.has(id));
 }
 
 function embedLobby(partida) {
@@ -153,7 +155,6 @@ client.on('interactionCreate', async (interaction) => {
         status: 'lobby',
         votes: new Map(),
         ronda: 0,
-        rondasMaximas: 0,
       };
       partidas.set(channelId, partida);
       await interaction.reply({
@@ -236,7 +237,8 @@ client.on('interactionCreate', async (interaction) => {
       partida.futbolista = futbolista;
       partida.status = 'jugando';
       partida.ronda = 1;
-      partida.rondasMaximas = calcularRondasMaximas(partida.players.size);
+
+      const inocentes = partida.players.size - cantImpostores;
 
       const partidaEmbed = new EmbedBuilder()
         .setColor(0x1db954)
@@ -244,9 +246,10 @@ client.on('interactionCreate', async (interaction) => {
         .setDescription(
           `**Jugadores:** ${partida.players.size}  |  **Impostores ocultos:** ${cantImpostores}\n\n` +
           '📨 Cada jugador debe apretar el botón para ver su rol.\n\n' +
-          '💬 Discutan en el chat y cuando estén listos, el host abre la votación.'
+          '💬 Discutan en el chat y cuando estén listos, el host abre la votación.\n\n' +
+          '_El impostor gana si los inocentes son iguales o menos que los impostores._'
         )
-        .setFooter({ text: `Ronda 1 de ${calcularRondasMaximas(partida.players.size)}` });
+        .setFooter({ text: `Ronda ${partida.ronda} — Inocentes: ${inocentes} | Impostores: ${cantImpostores}` });
 
       const rowJuego = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -275,7 +278,7 @@ client.on('interactionCreate', async (interaction) => {
               'Los demás jugadores recibieron el nombre de un futbolista.\n' +
               '**Vos no lo sabés.**\n\n' +
               'Respondé con confianza para no delatarte.\n' +
-              'Tenés que sobrevivir la votación para ganar.'
+              'Ganás si los inocentes son iguales o menos que los impostores.'
             )
             .setFooter({ text: '🔴 Solo vos podés ver esto' })
         : new EmbedBuilder()
@@ -302,7 +305,13 @@ client.on('interactionCreate', async (interaction) => {
       partida.votes.clear();
 
       const vivos = jugadoresVivos(partida);
-      const totalQueVotan = vivos.length;
+      const impVivos = impostoresVivos(partida).length;
+      const inoVivos = inocentesVivos(partida).length;
+
+      const opciones = vivos.map(([id, d]) => ({
+        label: d.username,
+        value: id,
+      }));
 
       const votacionEmbed = new EmbedBuilder()
         .setColor(0xff9900)
@@ -312,15 +321,7 @@ client.on('interactionCreate', async (interaction) => {
           'Cada jugador tiene que votar. El más votado es eliminado.\n' +
           '_En caso de empate, nadie es eliminado._'
         )
-        .setFooter({ text: `Votos: 0 / ${totalQueVotan}` });
-
-      // Opciones del menú: solo jugadores vivos
-      // Cada jugador ve el menú completo — la validación de no votarse
-      // a sí mismo se hace cuando procesa el voto
-      const opciones = vivos.map(([id, d]) => ({
-        label: d.username,
-        value: id,
-      }));
+        .setFooter({ text: `Votos: 0 / ${vivos.length} | Inocentes: ${inoVivos} | Impostores: ${impVivos}` });
 
       const rowVotacion = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
@@ -329,7 +330,28 @@ client.on('interactionCreate', async (interaction) => {
           .addOptions(opciones)
       );
 
-      await interaction.update({ embeds: [votacionEmbed], components: [rowVotacion] });
+      const rowForzar = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('forzar_votacion')
+          .setLabel('⚡ Forzar cierre (host)')
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      await interaction.update({ embeds: [votacionEmbed], components: [rowVotacion, rowForzar] });
+    }
+
+    if (customId === 'forzar_votacion') {
+      if (user.id !== partida.host) {
+        return interaction.reply({ content: '❌ Solo el host puede forzar el cierre.', ephemeral: true });
+      }
+      if (partida.status !== 'votando') {
+        return interaction.reply({ content: '❌ No hay votación activa.', ephemeral: true });
+      }
+      if (partida.votes.size === 0) {
+        return interaction.reply({ content: '❌ Nadie votó todavía. Esperá al menos un voto.', ephemeral: true });
+      }
+      await interaction.deferUpdate();
+      await cerrarVotacion(interaction, partida);
     }
   }
 
@@ -342,7 +364,6 @@ client.on('interactionCreate', async (interaction) => {
       if (!partida || partida.status !== 'votando') {
         return interaction.reply({ content: '❌ No hay votación activa.', ephemeral: true });
       }
-
       const datosVotante = partida.players.get(user.id);
       if (!datosVotante) {
         return interaction.reply({ content: '❌ No sos parte de esta partida.', ephemeral: true });
@@ -353,10 +374,7 @@ client.on('interactionCreate', async (interaction) => {
       if (partida.votes.has(user.id)) {
         return interaction.reply({ content: '⚠️ Ya votaste.', ephemeral: true });
       }
-
       const votadoId = interaction.values[0];
-
-      // No puede votarse a sí mismo
       if (votadoId === user.id) {
         return interaction.reply({ content: '❌ No podés votarte a vos mismo.', ephemeral: true });
       }
@@ -364,19 +382,18 @@ client.on('interactionCreate', async (interaction) => {
       partida.votes.set(user.id, votadoId);
 
       const vivos = jugadoresVivos(partida);
-      const totalQueVotan = vivos.length;
       const totalVotos = partida.votes.size;
 
       await interaction.reply({
-        content: `✅ Voto registrado. (${totalVotos}/${totalQueVotan})`,
+        content: `✅ Voto registrado. (${totalVotos}/${vivos.length})`,
         ephemeral: true,
       });
 
       const embedActualizado = EmbedBuilder.from(interaction.message.embeds[0])
-        .setFooter({ text: `Votos: ${totalVotos} / ${totalQueVotan}` });
+        .setFooter({ text: `Votos: ${totalVotos} / ${vivos.length}` });
       await interaction.message.edit({ embeds: [embedActualizado] });
 
-      if (totalVotos >= totalQueVotan) {
+      if (totalVotos >= vivos.length) {
         await cerrarVotacion(interaction, partida);
       }
     }
@@ -385,13 +402,11 @@ client.on('interactionCreate', async (interaction) => {
 
 // ===== CERRAR VOTACIÓN Y REVELAR =====
 async function cerrarVotacion(interaction, partida) {
-  // Contar votos
   const conteo = new Map();
   for (const votadoId of partida.votes.values()) {
     conteo.set(votadoId, (conteo.get(votadoId) || 0) + 1);
   }
 
-  // Encontrar el más votado
   let maxVotos = 0;
   let candidatos = [];
   for (const [id, votos] of conteo) {
@@ -403,7 +418,6 @@ async function cerrarVotacion(interaction, partida) {
   const eliminadoId = empate ? null : candidatos[0];
   const eraImpostor = eliminadoId ? partida.impostores.has(eliminadoId) : false;
 
-  // Quién votó a quién
   const detalleVotos = [...partida.votes.entries()]
     .map(([votanteId, votadoId]) => {
       const votante = partida.players.get(votanteId)?.username ?? 'Desconocido';
@@ -412,7 +426,6 @@ async function cerrarVotacion(interaction, partida) {
     })
     .join('\n');
 
-  // Resultado de conteo
   const resultados = [...conteo.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([id, v]) => {
@@ -436,11 +449,13 @@ async function cerrarVotacion(interaction, partida) {
     partida.players.get(eliminadoId).vivo = false;
   }
 
-   const finPorImpostoresEliminados = partida.impostores.size === 0;
-   const impostorSigueVivo = [...partida.impostores].some(id => partida.players.get(id)?.vivo);
-   const finPorRondas = partida.ronda >= partida.rondasMaximas && impostorSigueVivo;
+  const impVivos = impostoresVivos(partida).length;
+  const inoVivos = inocentesVivos(partida).length;
 
-  if (finPorImpostoresEliminados || finPorRondas) {
+  const finPorImpostoresEliminados = impVivos === 0;
+  const finPorSuperioridad = impVivos >= inoVivos && impVivos > 0;
+
+  if (finPorImpostoresEliminados || finPorSuperioridad) {
     const ganador = finPorImpostoresEliminados ? 'equipo' : 'impostor';
 
     const finalEmbed = new EmbedBuilder()
@@ -454,7 +469,6 @@ async function cerrarVotacion(interaction, partida) {
     return interaction.message.edit({ embeds: [finalEmbed], components: [] });
   }
 
-  // Siguiente ronda
   partida.ronda++;
   partida.status = 'jugando';
   partida.votes.clear();
@@ -463,7 +477,7 @@ async function cerrarVotacion(interaction, partida) {
     .setColor(0x1db954)
     .setTitle(`📋 Resultado — Ronda ${partida.ronda - 1}`)
     .setDescription(descripcion)
-    .setFooter({ text: `Ronda ${partida.ronda} de ${partida.rondasMaximas} — El host puede abrir la siguiente votación` });
+    .setFooter({ text: `Ronda ${partida.ronda} — Inocentes: ${inoVivos} | Impostores: ${impVivos}` });
 
   const rowSiguiente = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
